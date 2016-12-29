@@ -1,0 +1,15 @@
+[package]
+name = "twitter"
+version = "0.1.0"
+authors = ["Iori YONEJI <fivo.11235813@gmail.com>"]
+
+[dependencies]
+r2d2 = "*"
+r2d2_sqlite = "*"
+oauth-client = "*"
+egg-mode = "0.7.0"
+rand = "*"
+toml = "*"
+rustc-serialize = "*"
+rusqlite = "*"
+
