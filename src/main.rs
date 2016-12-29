@@ -9,7 +9,6 @@ extern crate r2d2_sqlite;
 use std::io;
 use std::io::prelude::*;
 use std::fs::File;
-use rusqlite::Error;
 
 #[derive(Debug, RustcEncodable, RustcDecodable)]
 struct AppConfig {
@@ -48,7 +47,7 @@ fn establish_resourcepool(db: &str)
 }
 
 fn generate_authorize_url<'a> (consumer: &egg_mode::Token<'a>) -> (String, egg_mode::Token<'a>) {
-    let mut req = egg_mode::request_token(consumer, "").unwrap();
+    let req = egg_mode::request_token(consumer, "").unwrap();
     let url = egg_mode::authenticate_url(&req);
     return (url, req);
 }
@@ -70,21 +69,38 @@ fn check_accesstoken<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>
     }
 }
 
+fn interact_to_get_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::Token<'a> {
+    let (url, request) = generate_authorize_url(&consumer);
+    let mut verifier = String::new();
+
+    println!("url: {}", url);
+    io::stdin().read_line(&mut verifier);
+
+    return access_token(&consumer, &request, verifier).unwrap();
+}
+
+
 fn main() {
     let config = read_consumer_token("setting.toml");
     let consumer = egg_mode::Token::new(config.consumer_key, config.consumer_secret);
     let pool = establish_resourcepool(&config.db_addr);
 
-    if (check_accesstoken(&pool)) {
+    let access = match check_accesstoken(&pool) {
+        Some(token) => token,
+        _   => interact_to_get_accesstoken(&consumer)
+    };
+
+    let mut home = egg_mode::tweet::home_timeline(&consumer, &access).with_page_size(5);
+    for tweet in &home.start().unwrap().response {
+        if let Some(ref user) = tweet.user {
+            println!("{};@{} ", user.name, user.screen_name);
+        }
+        if let Some(ref status) = tweet.retweeted_status {
+        }
+        else {
+            println!("{}", tweet.text);
+        }
     }
 
-    let (url, request) = generate_authorize_url(&consumer);
-
-    println!("url: {}", url);
-
-    let mut verifier = String::new();
-    io::stdin().read_line(&mut verifier);
-
-    let access = access_token(&consumer, &request, verifier);
 }
 
