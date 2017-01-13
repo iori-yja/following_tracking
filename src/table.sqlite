@@ -5,6 +5,23 @@ CREATE TABLE users(
 	twitter_name TEXT NOT NULL
 );
 
+CREATE TABLE follow_event(
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER,
+	founddate INTEGER,
+	event_type INTEGER
+);
+
+CREATE TABLE following(
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER
+);
+
+CREATE TABLE follower(
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER
+);
+
 CREATE TABLE access_token(
 	access_key	TEXT NOT NULL,
 	access_secret TEXT NOT NULL
