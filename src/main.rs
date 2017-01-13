@@ -9,6 +9,7 @@ extern crate r2d2_sqlite;
 use std::io;
 use std::io::prelude::*;
 use std::fs::File;
+use std::env;
 
 #[derive(Debug, RustcEncodable, RustcDecodable)]
 struct AppConfig {
@@ -59,7 +60,8 @@ fn read_consumer_token(config: &str) -> AppConfig {
     return toml::decode_str(&content).unwrap();
 }
 
-fn check_accesstoken<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) -> Option<egg_mode::Token<'a>> {
+/* Find previously stored accesstoken */
+fn find_accesstoken<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) -> Option<egg_mode::Token<'a>> {
     let conn = pool.get().unwrap();
     let query = "select access_key, access_secret from access_token";
     let response: Result<(String, String), rusqlite::Error> = conn.query_row(query, &[], |row| (row.get(0), row.get(1)));
@@ -67,6 +69,13 @@ fn check_accesstoken<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>
         Ok(res) => Some(egg_mode::Token::new(res.0, res.1)),
         _ => None
     }
+}
+
+/* Store accesstoken into database */
+fn store_accesstoken(token: &egg_mode::Token, pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) {
+    let conn = pool.get().unwrap();
+    let query = "insert into access_token(access_key, access_secret) values($1, $2, $3)";
+    conn.execute(query, &[&token.key.as_ref(), &token.secret.as_ref()]);
 }
 
 fn interact_to_get_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::Token<'a> {
@@ -79,28 +88,21 @@ fn interact_to_get_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::
     return access_token(&consumer, &request, verifier).unwrap();
 }
 
-
 fn main() {
     let config = read_consumer_token("setting.toml");
     let consumer = egg_mode::Token::new(config.consumer_key, config.consumer_secret);
     let pool = establish_resourcepool(&config.db_addr);
 
-    let access = match check_accesstoken(&pool) {
+    let access = match find_accesstoken(&pool) {
         Some(token) => token,
-        _   => interact_to_get_accesstoken(&consumer)
+        _   => {
+            let token = interact_to_get_accesstoken(&consumer);
+            store_accesstoken(&token, &pool);
+            token
+        }
     };
 
-    let mut home = egg_mode::tweet::home_timeline(&consumer, &access).with_page_size(5);
-    for tweet in &home.start().unwrap().response {
-        if let Some(ref user) = tweet.user {
-            println!("{};@{} ", user.name, user.screen_name);
-        }
-        if let Some(ref status) = tweet.retweeted_status {
-        }
-        else {
-            println!("{}", tweet.text);
-        }
-    }
-
+    let ref cred = egg_mode::verify_tokens(&consumer, &access).unwrap();
+    println!("Using this account's token @{}: {}", cred.screen_name, cred.name);
 }
 
