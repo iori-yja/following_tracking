@@ -74,11 +74,11 @@ fn find_accesstoken<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>)
 /* Store accesstoken into database */
 fn store_accesstoken(token: &egg_mode::Token, pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) {
     let conn = pool.get().unwrap();
-    let query = "insert into access_token(access_key, access_secret) values($1, $2, $3)";
+    let query = "insert into access_token(access_key, access_secret) values($1, $2)";
     conn.execute(query, &[&token.key.as_ref(), &token.secret.as_ref()]);
 }
 
-fn interact_to_get_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::Token<'a> {
+fn fetch_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::Token<'a> {
     let (url, request) = generate_authorize_url(&consumer);
     let mut verifier = String::new();
 
@@ -86,6 +86,13 @@ fn interact_to_get_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::
     io::stdin().read_line(&mut verifier);
 
     return access_token(&consumer, &request, verifier).unwrap();
+}
+
+fn show_all_follower(screen_name: String, consumer: &egg_mode::Token, access: &egg_mode::Token) {
+    let mut followers = egg_mode::user::followers_of(&screen_name, consumer, access);
+    for follower in followers.map(|u| {let uu = u.unwrap().response; (uu.screen_name, uu.name)}) {
+        println!("@{}:{}", follower.0, follower.1);
+    }
 }
 
 fn main() {
@@ -96,7 +103,7 @@ fn main() {
     let access = match find_accesstoken(&pool) {
         Some(token) => token,
         _   => {
-            let token = interact_to_get_accesstoken(&consumer);
+            let token = fetch_accesstoken(&consumer);
             store_accesstoken(&token, &pool);
             token
         }
@@ -104,5 +111,7 @@ fn main() {
 
     let ref cred = egg_mode::verify_tokens(&consumer, &access).unwrap();
     println!("Using this account's token @{}: {}", cred.screen_name, cred.name);
+
+    show_all_follower(cred.screen_name.clone(), &consumer, &access);
 }
 
