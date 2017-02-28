@@ -11,6 +11,7 @@ use std::io::prelude::*;
 use std::fs::File;
 use std::env;
 use std::collections::*;
+use std::iter::FromIterator;
 
 #[derive(Debug, RustcEncodable, RustcDecodable)]
 struct AppConfig {
@@ -125,10 +126,10 @@ fn check_follower_events<'a>(current: egg_mode::cursor::CursorIter<'a, egg_mode:
     (newface, previous)
 }
 
-fn get_known_accounts<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, table: String) -> HashSet<i64> {
+fn get_known_accounts<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, table: &str) -> HashSet<i64> {
     let query = format!("select user_id from {}", table);
     let conn = pool.get().unwrap();
-    let mut stmt = conn.prepare(query).unwrap();
+    let mut stmt = conn.prepare(&query).unwrap();
     let follower_list = stmt.query_map(&[], |row| row.get(0)).unwrap();
     let mut ret = HashSet::new();
     for f in follower_list {
@@ -158,5 +159,18 @@ fn main() {
     let previous_followers = get_known_accounts(&pool, "follower");
 
     let (n, r) = check_follower_events(current_followers, previous_followers);
+
+    println!("show new follower");
+    for i in n {
+        println!("{} (@{})", i.screenname, i.name);
+    }
+
+    let users = egg_mode::user::lookup(&Vec::from_iter(r), &consumer, &access);
+    for u in users.unwrap().response {
+        println!("{} (@{})", u.screen_name, u.name);
+    }
+
+    println!("show who removed me");
+
 }
 
