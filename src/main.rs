@@ -22,7 +22,7 @@ struct AppConfig {
 
 #[derive(Hash, RustcEncodable)]
 pub struct User {
-    pub user_id: i64,
+    pub id: i64,
     pub twitter_id: i64,
     pub screenname: String,
     pub name: String,
@@ -115,7 +115,7 @@ fn check_follower_events<'a>(current: egg_mode::cursor::CursorIter<'a, egg_mode:
         if !previous.remove(&f.id) {
             newface.insert(
                 User {
-                    user_id: f.id,
+                    id: 0,
                     twitter_id: f.id,
                     screenname: f.screen_name.clone(),
                     name: f.name.clone()
@@ -136,6 +136,29 @@ fn get_known_accounts<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager
         ret.insert(f.unwrap());
     }
     ret
+}
+
+/*
+struct FollowEvent {
+    id: i64,
+	user_id: i64,
+	founddate: i64,
+	event_type: i64
+}
+*/
+fn store_follower_events(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, comes: Vec<User>, leaves: Vec<User>, date: i64) {
+    let conn = pool.get().unwrap();
+    let query = "insert into follow_event(user_id, founddate, event_type) values($1, $2, $3)";
+    let mut t = 1; /* `1` indicates that the event is 'new follower` event */
+
+    for c in comes {
+        conn.execute(query, &[&c.id, &date, &t]);
+    }
+
+    t = 0;
+    for l in leaves {
+        conn.execute(query, &[&l.id, &date, &t]);
+    }
 }
 
 fn main() {
@@ -166,11 +189,12 @@ fn main() {
     }
 
     let users = egg_mode::user::lookup(&Vec::from_iter(r), &consumer, &access);
+    println!("show who removed me");
     for u in users.unwrap().response {
         println!("{} (@{})", u.screen_name, u.name);
     }
 
-    println!("show who removed me");
-
+    let previous_following = get_known_accounts(&pool, "following");
+    let current_following = egg_mode::user::friends_of(&cred.screen_name, &consumer, &access);
 }
 
