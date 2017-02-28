@@ -118,16 +118,15 @@ fn check_follower_events<'a>(current: egg_mode::cursor::CursorIter<'a, egg_mode:
                     twitter_id: f.id,
                     screenname: f.screen_name.clone(),
                     name: f.name.clone()
-                }
-                );
+                });
         }
     }
 
     (newface, previous)
 }
 
-fn get_known_followers<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) -> HashSet<i64> {
-    let query = "select user_id from follower";
+fn get_known_accounts<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, table: String) -> HashSet<i64> {
+    let query = format!("select user_id from {}", table);
     let conn = pool.get().unwrap();
     let mut stmt = conn.prepare(query).unwrap();
     let follower_list = stmt.query_map(&[], |row| row.get(0)).unwrap();
@@ -156,8 +155,8 @@ fn main() {
     println!("Using this account's token @{}: {}", cred.screen_name, cred.name);
 
     let current_followers = egg_mode::user::followers_of(&cred.screen_name, &consumer, &access);
-    let previous_followers = get_known_followers(&pool);
+    let previous_followers = get_known_accounts(&pool, "follower");
 
-    check_follower_events(current_followers, previous_followers);
+    let (n, r) = check_follower_events(current_followers, previous_followers);
 }
 
