@@ -167,8 +167,13 @@ fn store_user_if_not_known(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManage
     let mut ret = Vec::new();
 
     for mut u in users {
-        conn.execute(query, &[&u.twitter_id, &u.screenname, &u.name]);
-        u.id = conn.last_insert_rowid();
+        /* Because of unique restriction, write will fail if they are known. */
+        let wrote = conn.execute(query, &[&u.twitter_id, &u.screenname, &u.name]).unwrap();
+        if wrote == 1 {
+            u.id = conn.last_insert_rowid();
+        } else {
+            u.id = conn.query_row("select id from users where twitter=$1", &[&u.twitter_id], |row| {row.get(0)}).unwrap();
+        }
         ret.push(u);
     }
     ret
