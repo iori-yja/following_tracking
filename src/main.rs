@@ -161,6 +161,19 @@ fn store_follower_events(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>
     }
 }
 
+fn store_user_if_not_known(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, users: Vec<User>) -> Vec<User> {
+    let conn = pool.get().unwrap();
+    let query = "insert into users(twitter_id, screenname, name) values($1, $2, $3)";
+    let mut ret = Vec::new();
+
+    for mut u in users {
+        conn.execute(query, &[&u.twitter_id, &u.screenname, &u.name]);
+        u.id = conn.last_insert_rowid();
+        ret.push(u);
+    }
+    ret
+}
+
 fn main() {
     let config = read_consumer_token("setting.toml");
     let consumer = egg_mode::Token::new(config.consumer_key, config.consumer_secret);
@@ -183,8 +196,10 @@ fn main() {
 
     let (n, r) = check_follower_events(current_followers, previous_followers);
 
+    let newf = store_user_if_not_known(&pool, Vec::from_iter(n));
+
     println!("show new follower");
-    for i in n {
+    for i in newf {
         println!("{} (@{})", i.screenname, i.name);
     }
 
