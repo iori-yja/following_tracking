@@ -26,6 +26,14 @@ pub struct User {
     pub name: String,
 }
 
+#[derive(RustcEncodable, RustcDecodable)]
+struct FollowEvent {
+    id: i64,
+	user_id: i64,
+	founddate: i64,
+	event_type: i64
+}
+
 fn access_token<'a> (consumer: &egg_mode::Token, request: &egg_mode::Token,
                  oauth_verifier: String) -> Option<egg_mode::Token<'a>> {
     match egg_mode::access_token(consumer, request, oauth_verifier) {
@@ -88,17 +96,25 @@ fn fetch_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::Token<'a> 
     return access_token(&consumer, &request, verifier).unwrap();
 }
 
-fn show_all_follower(screen_name: String, consumer: &egg_mode::Token, access: &egg_mode::Token) {
-    let mut followers = egg_mode::user::followers_of(&screen_name, consumer, access);
+fn check_follower_events<'a>(followers: egg_mode::cursor::CursorIter<'a, egg_mode::cursor::UserCursor>, verbose: bool) {
+    if verbose println!("######dump all current followers######");
     for follower in followers.map(|u| {let uu = u.unwrap().response; (uu.screen_name, uu.name)}) {
-        println!("@{}:{}", follower.0, follower.1);
+        if verbose println!("@{}:{}", follower.0, follower.1);
     }
+}
+
+fn get_known_followers<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) -> Vec<i64> {
+    let conn = pool.get().unwrap();
+    let query = "select user_id from follower";
+    let follower_list = conn.query_map(query, &[], |row| row.get(0)).unwrap();
+
 }
 
 fn main() {
     let config = read_consumer_token("setting.toml");
     let consumer = egg_mode::Token::new(config.consumer_key, config.consumer_secret);
     let pool = establish_resourcepool(&config.db_addr);
+    let verbose = false; //XXX
 
     let access = match find_accesstoken(&pool) {
         Some(token) => token,
@@ -112,6 +128,7 @@ fn main() {
     let ref cred = egg_mode::verify_tokens(&consumer, &access).unwrap();
     println!("Using this account's token @{}: {}", cred.screen_name, cred.name);
 
-    show_all_follower(cred.screen_name.clone(), &consumer, &access);
+    let current_followers = egg_mode::user::followers_of(&cred.screen_name, &consumer, &access);
+    let previous_followers = get_known_followers(&pool);
 }
 
