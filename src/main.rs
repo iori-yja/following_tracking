@@ -10,6 +10,7 @@ use std::io;
 use std::io::prelude::*;
 use std::fs::File;
 use std::env;
+use std::collections::*;
 
 #[derive(Debug, RustcEncodable, RustcDecodable)]
 struct AppConfig {
@@ -18,13 +19,21 @@ struct AppConfig {
     db_addr: String,
 }
 
-#[derive(RustcEncodable)]
+#[derive(Hash, RustcEncodable)]
 pub struct User {
-    pub user_id: i32,
+    pub user_id: i64,
     pub twitter_id: i64,
     pub screenname: String,
     pub name: String,
 }
+
+impl PartialEq for User {
+    fn eq(&self, other: &User) -> bool {
+        self.twitter_id == other.twitter_id
+    }
+}
+
+impl Eq for User {}
 
 #[derive(RustcEncodable, RustcDecodable)]
 struct FollowEvent {
@@ -70,9 +79,10 @@ fn read_consumer_token(config: &str) -> AppConfig {
 
 /* Find previously stored accesstoken */
 fn find_accesstoken<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) -> Option<egg_mode::Token<'a>> {
-    let conn = pool.get().unwrap();
     let query = "select access_key, access_secret from access_token";
-    let response: Result<(String, String), rusqlite::Error> = conn.query_row(query, &[], |row| (row.get(0), row.get(1)));
+    let conn = pool.get().unwrap();
+    let mut stmt = conn.prepare(query).unwrap();
+    let response: Result<(String, String), _> = stmt.query_row(&[], |row| (row.get(0), row.get(1)));
     match  response {
         Ok(res) => Some(egg_mode::Token::new(res.0, res.1)),
         _ => None
@@ -96,25 +106,42 @@ fn fetch_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::Token<'a> 
     return access_token(&consumer, &request, verifier).unwrap();
 }
 
-fn check_follower_events<'a>(followers: egg_mode::cursor::CursorIter<'a, egg_mode::cursor::UserCursor>, verbose: bool) {
-    if verbose println!("######dump all current followers######");
-    for follower in followers.map(|u| {let uu = u.unwrap().response; (uu.screen_name, uu.name)}) {
-        if verbose println!("@{}:{}", follower.0, follower.1);
+fn check_follower_events<'a>(current: egg_mode::cursor::CursorIter<'a, egg_mode::cursor::UserCursor>,
+                             mut previous: HashSet<i64>) -> (HashSet<User>, HashSet<i64>) {
+    let mut newface = HashSet::new();
+
+    for f in current.map(|u| {u.unwrap()}) {
+        if !previous.remove(&f.id) {
+            newface.insert(
+                User {
+                    user_id: f.id,
+                    twitter_id: f.id,
+                    screenname: f.screen_name.clone(),
+                    name: f.name.clone()
+                }
+                );
+        }
     }
+
+    (newface, previous)
 }
 
-fn get_known_followers<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) -> Vec<i64> {
-    let conn = pool.get().unwrap();
+fn get_known_followers<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) -> HashSet<i64> {
     let query = "select user_id from follower";
-    let follower_list = conn.query_map(query, &[], |row| row.get(0)).unwrap();
-
+    let conn = pool.get().unwrap();
+    let mut stmt = conn.prepare(query).unwrap();
+    let follower_list = stmt.query_map(&[], |row| row.get(0)).unwrap();
+    let mut ret = HashSet::new();
+    for f in follower_list {
+        ret.insert(f.unwrap());
+    }
+    ret
 }
 
 fn main() {
     let config = read_consumer_token("setting.toml");
     let consumer = egg_mode::Token::new(config.consumer_key, config.consumer_secret);
     let pool = establish_resourcepool(&config.db_addr);
-    let verbose = false; //XXX
 
     let access = match find_accesstoken(&pool) {
         Some(token) => token,
@@ -130,5 +157,7 @@ fn main() {
 
     let current_followers = egg_mode::user::followers_of(&cred.screen_name, &consumer, &access);
     let previous_followers = get_known_followers(&pool);
+
+    check_follower_events(current_followers, previous_followers);
 }
 
