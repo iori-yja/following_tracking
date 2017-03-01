@@ -107,7 +107,7 @@ fn fetch_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::Token<'a> 
     return access_token(&consumer, &request, verifier).unwrap();
 }
 
-fn check_follower_events<'a>(current: egg_mode::cursor::CursorIter<'a, egg_mode::cursor::UserCursor>,
+fn check_diff_lists<'a>(current: egg_mode::cursor::CursorIter<'a, egg_mode::cursor::UserCursor>,
                              mut previous: HashSet<i64>) -> (HashSet<User>, HashSet<i64>) {
     let mut newface = HashSet::new();
 
@@ -179,6 +179,18 @@ fn store_user_if_not_known(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManage
     ret
 }
 
+fn print_follow_event(new: &Vec<User>, rem: &Vec<User>) {
+    println!("######### show new follower #########");
+    for i in new {
+        println!("{} (@{})", i.screenname, i.name);
+    }
+
+    println!("######## show who removed me ########");
+    for u in rem {
+        println!("{} (@{})", u.screenname, u.name);
+    }
+}
+
 fn main() {
     let config = read_consumer_token("setting.toml");
     let consumer = egg_mode::Token::new(config.consumer_key, config.consumer_secret);
@@ -199,22 +211,25 @@ fn main() {
     let current_followers = egg_mode::user::followers_of(&cred.screen_name, &consumer, &access);
     let previous_followers = get_known_accounts(&pool, "follower");
 
-    let (n, r) = check_follower_events(current_followers, previous_followers);
+    let (n, r) = check_diff_lists(current_followers, previous_followers);
 
-    let newf = store_user_if_not_known(&pool, Vec::from_iter(n));
+    let converter =
+        |x: egg_mode::user::TwitterUser| {
+            User {
+            id: 0,
+            twitter_id: x.id,
+            screenname: x.screen_name,
+            name: x.name
+            }
+        };
 
-    println!("show new follower");
-    for i in newf {
-        println!("{} (@{})", i.screenname, i.name);
-    }
+    let newfaces = store_user_if_not_known(&pool, Vec::from_iter(n));
+    let newloosers = Vec::from_iter(
+                        egg_mode::user::lookup(&Vec::from_iter(r), &consumer, &access)
+                            .unwrap().response
+                            .into_iter().map(converter)
+                     );
 
-    let users = egg_mode::user::lookup(&Vec::from_iter(r), &consumer, &access);
-    println!("show who removed me");
-    for u in users.unwrap().response {
-        println!("{} (@{})", u.screen_name, u.name);
-    }
-
-    let previous_following = get_known_accounts(&pool, "following");
-    let current_following = egg_mode::user::friends_of(&cred.screen_name, &consumer, &access);
+    print_follow_event(&newfaces, &newloosers);
 }
 
