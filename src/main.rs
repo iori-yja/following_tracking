@@ -106,11 +106,11 @@ fn fetch_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::Token<'a> 
     return access_token(&consumer, &request, verifier).unwrap();
 }
 
-fn check_diff_lists<'a>(current: egg_mode::cursor::CursorIter<'a, egg_mode::cursor::UserCursor>,
+fn check_diff_lists(current: Vec<egg_mode::Response<egg_mode::user::TwitterUser>>,
                              mut previous: HashSet<i64>) -> (HashSet<User>, HashSet<i64>) {
     let mut newface = HashSet::new();
 
-    for f in current.map(|u| {u.unwrap()}) {
+    for f in current {
         if !previous.remove(&f.id) {
             newface.insert(
                 User {
@@ -125,8 +125,25 @@ fn check_diff_lists<'a>(current: egg_mode::cursor::CursorIter<'a, egg_mode::curs
     (newface, previous)
 }
 
+fn update_table(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, table: &str,
+                users: egg_mode::cursor::CursorIter<egg_mode::cursor::UserCursor>)
+                -> Vec<egg_mode::Response<egg_mode::user::TwitterUser>> {
+
+    let conn = pool.get().unwrap();
+ //   conn.execute("drop table $1", &[&table]);
+    let query = format!("insert into {}(twitter_id) values ($1)", table);
+    let mut ret = Vec::new();
+
+    for u in users.map(|u| {u.unwrap()}) {
+        conn.execute(&query, &[&u.id]);
+        ret.push(u);
+    }
+
+    ret
+}
+
 fn get_known_accounts<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, table: &str) -> HashSet<i64> {
-    let query = format!("select user_id from {}", table);
+    let query = format!("select twitter_id from {}", table);
     let conn = pool.get().unwrap();
     let mut stmt = conn.prepare(&query).unwrap();
     let follower_list = stmt.query_map(&[], |row| row.get(0)).unwrap();
@@ -200,8 +217,10 @@ fn main() {
     let ref cred = egg_mode::verify_tokens(&consumer, &access).unwrap();
     println!("Using this account's token @{}: {}", cred.screen_name, cred.name);
 
-    let current_followers = egg_mode::user::followers_of(&cred.screen_name, &consumer, &access);
+    let raw_followers = egg_mode::user::followers_of(&cred.screen_name, &consumer, &access);
     let previous_followers = get_known_accounts(&pool, "follower");
+
+    let current_followers = update_table(&pool, "follower", raw_followers);
 
     let (n, r) = check_diff_lists(current_followers, previous_followers);
 
@@ -216,12 +235,15 @@ fn main() {
         };
 
     let newfaces = store_user_if_not_known(&pool, Vec::from_iter(n));
-    let newloosers = store_user_if_not_known(&pool,
+    let mut newloosers = Vec::new();
+    if !r.is_empty() {
+        newloosers = store_user_if_not_known(&pool,
                                              Vec::from_iter(
                                                  egg_mode::user::lookup(&Vec::from_iter(r), &consumer, &access)
                                                         .unwrap().response.into_iter().map(converter)
                                                         )
                                              );
+    }
 
     print_follow_event(&newfaces, &newloosers);
     store_follower_events(&pool, newfaces, newloosers, 20170301);

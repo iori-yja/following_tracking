@@ -14,12 +14,12 @@ CREATE TABLE follow_event(
 
 CREATE TABLE following(
 	id INTEGER PRIMARY KEY,
-	user_id INTEGER
+	twitter_id INTEGER
 );
 
 CREATE TABLE follower(
 	id INTEGER PRIMARY KEY,
-	user_id INTEGER
+	twitter_id INTEGER
 );
 
 CREATE TABLE access_token(
