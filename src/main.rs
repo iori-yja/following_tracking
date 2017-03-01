@@ -9,7 +9,6 @@ extern crate r2d2_sqlite;
 use std::io;
 use std::io::prelude::*;
 use std::fs::File;
-use std::env;
 use std::collections::*;
 use std::iter::FromIterator;
 
@@ -101,7 +100,7 @@ fn fetch_accesstoken<'a>(consumer: &egg_mode::Token<'a>) -> egg_mode::Token<'a> 
     let (url, request) = generate_authorize_url(&consumer);
     let mut verifier = String::new();
 
-    println!("url: {}", url);
+    print!("url: {}\n >", url);
     io::stdin().read_line(&mut verifier);
 
     return access_token(&consumer, &request, verifier).unwrap();
@@ -138,14 +137,6 @@ fn get_known_accounts<'a>(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager
     ret
 }
 
-/*
-struct FollowEvent {
-    id: i64,
-	user_id: i64,
-	founddate: i64,
-	event_type: i64
-}
-*/
 fn store_follower_events(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, comes: Vec<User>, leaves: Vec<User>, date: i64) {
     let conn = pool.get().unwrap();
     let query = "insert into follow_event(user_id, founddate, event_type) values($1, $2, $3)";
@@ -167,12 +158,13 @@ fn store_user_if_not_known(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManage
     let mut ret = Vec::new();
 
     for mut u in users {
-        /* Because of unique restriction, write will fail if they are known. */
-        let wrote = conn.execute(query, &[&u.twitter_id, &u.screenname, &u.name]).unwrap();
-        if wrote == 1 {
-            u.id = conn.last_insert_rowid();
+        let id = conn.query_row("select id from users where twitter_id=$1", &[&u.twitter_id], |row| {row.get(0)});
+
+        if id.is_ok() {
+            u.id = id.unwrap();
         } else {
-            u.id = conn.query_row("select id from users where twitter=$1", &[&u.twitter_id], |row| {row.get(0)}).unwrap();
+            conn.execute(query, &[&u.twitter_id, &u.screenname, &u.name]).unwrap();
+            u.id = conn.last_insert_rowid();
         }
         ret.push(u);
     }
@@ -224,12 +216,14 @@ fn main() {
         };
 
     let newfaces = store_user_if_not_known(&pool, Vec::from_iter(n));
-    let newloosers = Vec::from_iter(
-                        egg_mode::user::lookup(&Vec::from_iter(r), &consumer, &access)
-                            .unwrap().response
-                            .into_iter().map(converter)
-                     );
+    let newloosers = store_user_if_not_known(&pool,
+                                             Vec::from_iter(
+                                                 egg_mode::user::lookup(&Vec::from_iter(r), &consumer, &access)
+                                                        .unwrap().response.into_iter().map(converter)
+                                                        )
+                                             );
 
     print_follow_event(&newfaces, &newloosers);
+    store_follower_events(&pool, newfaces, newloosers, 20170301);
 }
 
